@@ -78,7 +78,7 @@ const Dashboard = () => {
       <div className="flex-1 flex flex-col min-w-0">
         <DashboardHeader />
 
-        <main className="flex-1 p-6 overflow-auto">
+        <main className="flex-1 p-6">
           <AnimatePresence mode="wait">
             {view === "home" && (
               <DashboardHome key="home" onViewPosition={handleViewPosition} />

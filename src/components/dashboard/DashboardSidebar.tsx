@@ -94,7 +94,7 @@ export function DashboardSidebar({
       </div>
 
       {/* Main Nav */}
-      <nav className="flex-1 p-3 mt-4 space-y-1">
+      <nav className="flex-1 p-3 mt-4 space-y-1 overflow-y-auto">
         <p className={cn("text-[10px] uppercase tracking-widest text-muted-foreground mb-2", isCollapsed && "sr-only")}>
           Menu
         </p>
@@ -192,7 +192,7 @@ export function DashboardSidebar({
     <motion.aside
       initial={false}
       animate={{ width: isCollapsed ? 72 : 256 }}
-      className="relative h-screen bg-sidebar border-r border-border/30 flex flex-col shrink-0"
+      className="sticky top-0 h-screen bg-sidebar border-r border-border/30 flex flex-col shrink-0"
     >
       <SidebarContent />
 
