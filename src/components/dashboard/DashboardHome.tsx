@@ -135,14 +135,6 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
   const handleJDChoice = async (choice: "create" | "upload") => {
     if (!createdPosition) return;
     
-    if (choice === "upload") {
-      setPositions((prev) =>
-        prev.map((p) => (p.id === createdPosition.id ? { ...p, jdChoice: choice } : p))
-      );
-      setCreatedPosition((p) => (p ? { ...p, jdChoice: choice } : p));
-      return;
-    }
-
     // Auto-generate JD with AI
     setIsGeneratingJD(true);
     try {
@@ -534,24 +526,6 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
                             <p className="text-xs text-muted-foreground">{isGeneratingJD ? "This takes a few seconds" : "Use the Adaptive JD Generator"}</p>
                           </div>
                           {createdPosition?.jdChoice === "create" && <CheckCircle2 className="h-5 w-5 text-primary ml-auto" />}
-                        </button>
-
-                        <button
-                          onClick={() => handleJDChoice("upload")}
-                          className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-200 text-left ${
-                            createdPosition?.jdChoice === "upload"
-                              ? "border-primary bg-primary/10 glow-sm"
-                              : "border-border/40 hover:border-primary/50 hover:bg-primary/5"
-                          }`}
-                        >
-                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-muted">
-                            <Upload className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-foreground text-sm">Upload JD</p>
-                            <p className="text-xs text-muted-foreground">Upload an existing job description</p>
-                          </div>
-                          {createdPosition?.jdChoice === "upload" && <CheckCircle2 className="h-5 w-5 text-primary ml-auto" />}
                         </button>
                       </div>
                     </div>

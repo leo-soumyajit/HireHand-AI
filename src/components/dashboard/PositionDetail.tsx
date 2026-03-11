@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { PositionData, PositionJD, CandidateData, loadPositions, savePositions } from "@/types/positions";
-import { enhanceJDWithAI } from "@/lib/openrouter";
+import { enhanceJDWithAI, enhanceFullJDWithAI } from "@/lib/openrouter";
 import { useToast } from "@/hooks/use-toast";
 import { CandidatesTab } from "@/components/dashboard/CandidatesTab";
 
@@ -225,7 +225,7 @@ function OverviewTab({ position }: { position: PositionData }) {
 
 function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd: PositionJD, versionCounter: number) => void }) {
   const { toast } = useToast();
-  const [jdView, setJdView] = useState<"choice" | "paste" | "upload" | "view">("view");
+  const [jdView, setJdView] = useState<"choice" | "paste" | "enhance_full" | "view">("view");
   const [jdText, setJdText] = useState("");
   const [isEnhancing, setIsEnhancing] = useState(false);
   
@@ -269,15 +269,61 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEnhanceFullJD = async () => {
+    if (!jdText.trim()) return;
+    setIsEnhancing(true);
+    try {
+      const enhancedJD = await enhanceFullJDWithAI(jdText);
+      const nextVersion = position.jdVersions ? position.jdVersions.length + 1 : 1;
+      onJDSaved(enhancedJD, nextVersion);
+      setSelectedVersionId(nextVersion);
+      setJdView("view");
+      toast({
+        title: "JD Completely Enhanced",
+        description: `Your pasted JD has been transformed into Version ${nextVersion}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Enhancement failed",
+        description: error instanceof Error ? error.message : "Failed to enhance JD",
+        variant: "destructive"
+      });
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
+  // (Removed Upload Logic entirelly)
+
+  const handleFileUploadHeader = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const content = event.target?.result;
-      if (typeof content === "string") {
-        setJdText(content);
-        setJdView("paste"); // Go to paste view to allow editing before generating
+      if (typeof content === "string" && content.trim()) {
+        setIsEnhancing(true);
+        try {
+          const enhancedJD = await enhanceFullJDWithAI(content);
+          const nextVersion = position.jdVersions ? position.jdVersions.length + 1 : 1;
+          onJDSaved(enhancedJD, nextVersion);
+          setSelectedVersionId(nextVersion);
+          setJdView("view");
+          toast({
+            title: "File Analyzed & JD Created",
+            description: `Your uploaded file has been transformed into Version ${nextVersion}.`,
+          });
+        } catch (error) {
+          toast({
+            title: "Upload Analysis failed",
+            description: error instanceof Error ? error.message : "Failed to analyze loaded JD",
+            variant: "destructive"
+          });
+        } finally {
+          setIsEnhancing(false);
+          // Reset the input so the same file can be selected again if needed
+          e.target.value = '';
+        }
       }
     };
     reader.readAsText(file);
@@ -293,9 +339,9 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
       const opt = {
         margin:       10,
         filename:     `${position.title.replace(/ /g, '_')}_JD_v${selectedVersionId}.pdf`,
-        image:        { type: 'jpeg', quality: 0.98 },
+        image:        { type: 'jpeg' as const, quality: 0.98 },
         html2canvas:  { scale: 2 },
-        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
       };
       html2pdf().set(opt).from(element).save();
       toast({
@@ -359,6 +405,49 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
       );
     }
 
+    if (jdView === "enhance_full") {
+      return (
+        <Card className="glass-strong">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground font-display">Paste Existing Job Description</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              Paste your entire existing Job Description here. Our AI will analyze it, fix grammar, expand on short bullet points, and restructure it into our elite FAANG format.
+            </p>
+            <Textarea
+              placeholder="Paste your existing full Job Description text here..."
+              value={jdText}
+              onChange={(e) => setJdText(e.target.value)}
+              className="min-h-[250px] bg-background/50 border-border/50 focus:border-primary text-sm text-foreground placeholder:text-muted-foreground resize-none"
+              disabled={isEnhancing}
+            />
+            <div className="flex items-center justify-end gap-3">
+              <Button variant="ghost" onClick={() => setJdView(position.jd ? "view" : "choice")} disabled={isEnhancing}>Back</Button>
+              <Button
+                onClick={handleEnhanceFullJD}
+                disabled={!jdText.trim() || isEnhancing}
+                className="gradient-primary text-primary-foreground font-semibold rounded-lg hover:opacity-90 min-w-[140px]"
+              >
+                {isEnhancing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                    Enhancing...
+                  </div>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Transform & Save
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      );
+    }
+
     // Choice view
     return (
       <Card className="glass-strong">
@@ -381,18 +470,21 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
                 <p className="text-xs text-muted-foreground mt-1">AI will enhance formatting</p>
               </div>
             </button>
-            <label
+            <button
+              onClick={() => {
+                setJdText("");
+                setJdView("enhance_full");
+              }}
               className="flex flex-col items-center gap-3 p-6 rounded-xl border border-border/40 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 group cursor-pointer"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-muted group-hover:bg-muted/80 transition-all">
-                <Upload className="h-6 w-6 text-muted-foreground" />
+                <FileText className="h-6 w-6 text-muted-foreground" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-foreground text-sm flex items-center justify-center gap-1">Upload <Sparkles className="h-3 w-3 text-primary" /></p>
-                <p className="text-xs text-muted-foreground mt-1">Upload a .txt document</p>
+                <p className="font-semibold text-foreground text-sm flex items-center justify-center gap-1">Enhance Existing JD <Sparkles className="h-3 w-3 text-primary" /></p>
+                <p className="text-xs text-muted-foreground mt-1">Paste a full JD to convert</p>
               </div>
-              <input type="file" accept=".txt,.md" className="hidden" onChange={handleFileUpload} />
-            </label>
+            </button>
           </div>
         </CardContent>
       </Card>
@@ -423,10 +515,17 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* File Upload Hidden Input & Label Button */}
+          <label className={`flex items-center gap-2 h-9 px-3 text-sm font-medium transition-colors border border-border/50 rounded-md cursor-pointer ${isEnhancing ? 'opacity-50 pointer-events-none' : 'hover:bg-muted'}`}>
+            <Upload className="h-4 w-4" />
+            {isEnhancing ? "Analyzing..." : "Upload JD"}
+            <input type="file" accept=".txt,.md" className="hidden" onChange={handleFileUploadHeader} disabled={isEnhancing} />
+          </label>
           <Button 
             variant="outline" 
             size="sm" 
             onClick={handleExportPDF}
+            disabled={isEnhancing}
             className="border-border/50 hover:bg-muted"
           >
             <Download className="h-4 w-4 mr-2" />
@@ -435,13 +534,18 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
           <Button 
             variant="outline" 
             size="sm" 
+            disabled={isEnhancing}
             className="border-primary/50 text-primary hover:bg-primary/10"
             onClick={() => {
               setJdText("");
               setJdView("paste"); // Clear text to let them paste fresh criteria for new version
             }}
           >
-            <Sparkles className="h-4 w-4 mr-2" />
+            {isEnhancing ? (
+              <div className="h-4 w-4 mr-2 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4 mr-2" />
+            )}
             Enhance / Modify
           </Button>
         </div>

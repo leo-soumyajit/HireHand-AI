@@ -188,3 +188,86 @@ Required JSON format:
     throw error;
   }
 }
+
+export async function enhanceFullJDWithAI(rawJD: string): Promise<PositionJD> {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("OpenRouter API Key is missing. Please set VITE_OPENROUTER_API_KEY in your .env.local file.");
+  }
+
+  const systemPrompt = `You are an Elite Executive Technical Recruiter at a FAANG tier company. You write highly professional, expansive, and deeply engaging Job Descriptions. 
+Your task is to take an ENTIRE existing, potentially unformatted, messy, or basic Job Description provided by the user, and completely rewrite it to an elite FAANG standard.
+You must extract all the relevant information and structure it perfectly.
+
+OUTPUT REQUIREMENTS:
+- "purpose": 4-6 highly professional sentences detailing the role's strategic impact and core mission. Enhance the grammar and tone.
+- "education": 4+ rigorous and detailed bullet points (degrees, preferred certifications) extracted or logically inferred.
+- "experience": 6+ highly descriptive bullet points blending technical requirements, scale, and cross-functional leadership based on what is provided.
+- "responsibilities": 8-10 expansive, action-oriented bullet points outlining daily tasks, ownership, and strategic deliverables.
+- "skills": 10+ specific hard and soft skills, technologies, and traits.
+
+You MUST respond strictly with a valid JSON object matching the exact format below. Do not include any markdown formatting or text outside the JSON object.
+
+Required JSON format:
+{
+  "purpose": "string",
+  "education": ["string", "string"],
+  "experience": ["string", "string"],
+  "responsibilities": ["string", "string"],
+  "skills": ["string", "string"]
+}`;
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: OPENROUTER_MODEL,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Please completely restructure and enhance this raw Job Description into an elite format:\n\n${rawJD}` }
+        ]
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData?.error?.message || `API request failed with status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    let content = data.choices?.[0]?.message?.content;
+    
+    if (!content) {
+      throw new Error("Invalid response from OpenRouter API: No content returned.");
+    }
+
+    try {
+      content = content.replace(/```json/g, "").replace(/```/g, "").trim();
+      const parsedContent = JSON.parse(content);
+      
+      const jd = parsedContent as Partial<PositionJD>;
+      if (
+        !jd.purpose ||
+        !Array.isArray(jd.education) ||
+        !Array.isArray(jd.experience) ||
+        !Array.isArray(jd.responsibilities) ||
+        !Array.isArray(jd.skills)
+      ) {
+        console.error("Unexpected JSON structure:", parsedContent);
+        throw new Error("Invalid response format: The AI did not return the expected Job Description structure.");
+      }
+
+      return jd as PositionJD;
+    } catch (parseError) {
+      console.error("JSON Parsing Error:", content);
+      throw new Error("Failed to parse the generated Job Description. The AI might not have returned valid JSON.");
+    }
+  } catch (error) {
+    console.error("Error enhancing full JD:", error);
+    throw error;
+  }
+}
