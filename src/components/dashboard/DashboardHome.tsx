@@ -54,8 +54,9 @@ import {
   loadPositions,
   savePositions,
   generateReqId,
-  createMockJD,
 } from "@/types/positions";
+import { enhanceJDWithAI } from "@/lib/openrouter";
+import { useToast } from "@/hooks/use-toast";
 
 type ModalStep = "form" | "success";
 type ModalMode = "create" | "edit";
@@ -82,6 +83,8 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
   const [createdPosition, setCreatedPosition] = useState<PositionData | null>(null);
   const [form, setForm] = useState({ title: "", bu: "", location: "", level: "Mid" });
   const [statusFilter, setStatusFilter] = useState<"Active" | "Closed">("Active");
+  const [isGeneratingJD, setIsGeneratingJD] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     savePositions(positions);
@@ -114,6 +117,7 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
       status: "Active",
       jdChoice: null,
       jd: null,
+      jdVersions: [],
       stats: { candidates: 0, avgScore: 0, sla: "On Track", riskFlags: 0 },
       candidates: 0,
       shortlisted: 0,
@@ -128,13 +132,43 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
     setModalStep("success");
   };
 
-  const handleJDChoice = (choice: "create" | "upload") => {
+  const handleJDChoice = async (choice: "create" | "upload") => {
     if (!createdPosition) return;
-    const jd = choice === "create" ? createMockJD(createdPosition.title) : null;
-    setPositions((prev) =>
-      prev.map((p) => (p.id === createdPosition.id ? { ...p, jdChoice: choice, jd } : p))
-    );
-    setCreatedPosition((p) => (p ? { ...p, jdChoice: choice, jd } : p));
+    
+    if (choice === "upload") {
+      setPositions((prev) =>
+        prev.map((p) => (p.id === createdPosition.id ? { ...p, jdChoice: choice } : p))
+      );
+      setCreatedPosition((p) => (p ? { ...p, jdChoice: choice } : p));
+      return;
+    }
+
+    // Auto-generate JD with AI
+    setIsGeneratingJD(true);
+    try {
+      const prompt = `Write a highly professional and structured Job Description for a ${createdPosition.level} ${createdPosition.title} in the ${createdPosition.department} department located in ${createdPosition.location}. Make the tone professional, comprehensive, and engaging. Return it in the exact required JSON structure.`;
+      const generatedJD = await enhanceJDWithAI(prompt);
+      
+      const newVersion = { version: 1, jd: generatedJD, createdAt: new Date().toISOString() };
+      
+      setPositions((prev) =>
+        prev.map((p) => (p.id === createdPosition.id ? { ...p, jdChoice: choice, jd: generatedJD, jdVersions: [newVersion] } : p))
+      );
+      setCreatedPosition((p) => (p ? { ...p, jdChoice: choice, jd: generatedJD, jdVersions: [newVersion] } : p));
+      
+      toast({
+        title: "JD Generated successfully",
+        description: "Your AI-generated Job Description has been saved as Version 1.",
+      });
+    } catch (error) {
+      toast({
+        title: "Generation failed",
+        description: error instanceof Error ? error.message : "Failed to generate JD",
+        variant: "destructive"
+      });
+    } finally {
+      setIsGeneratingJD(false);
+    }
   };
 
   const handleGoToPosition = () => {
@@ -481,18 +515,23 @@ export function DashboardHome({ onViewPosition }: DashboardHomeProps) {
                       <div className="grid grid-cols-1 gap-3">
                         <button
                           onClick={() => handleJDChoice("create")}
+                          disabled={isGeneratingJD}
                           className={`flex items-center gap-4 p-4 rounded-xl border transition-all duration-200 text-left ${
                             createdPosition?.jdChoice === "create"
                               ? "border-primary bg-primary/10 glow-sm"
                               : "border-border/40 hover:border-primary/50 hover:bg-primary/5"
-                          }`}
+                          } ${isGeneratingJD ? "opacity-70 pointer-events-none" : ""}`}
                         >
                           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl gradient-primary">
-                            <Sparkles className="h-5 w-5 text-primary-foreground" />
+                            {isGeneratingJD ? (
+                               <div className="h-5 w-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                            ) : (
+                               <Sparkles className="h-5 w-5 text-primary-foreground" />
+                            )}
                           </div>
                           <div>
-                            <p className="font-semibold text-foreground text-sm">Create JD with AI</p>
-                            <p className="text-xs text-muted-foreground">Use the Adaptive JD Generator</p>
+                            <p className="font-semibold text-foreground text-sm">{isGeneratingJD ? "Generating JD..." : "Create JD with AI"}</p>
+                            <p className="text-xs text-muted-foreground">{isGeneratingJD ? "This takes a few seconds" : "Use the Adaptive JD Generator"}</p>
                           </div>
                           {createdPosition?.jdChoice === "create" && <CheckCircle2 className="h-5 w-5 text-primary ml-auto" />}
                         </button>

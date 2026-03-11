@@ -39,6 +39,7 @@ export interface PositionData {
   status: string;
   jdChoice: "create" | "upload" | null;
   jd: PositionJD | null;
+  jdVersions: { version: number; jd: PositionJD; createdAt: string }[];
   stats: PositionStats;
   candidates: number;
   shortlisted: number;
@@ -103,6 +104,7 @@ export const DEFAULT_POSITIONS: PositionData[] = [
     status: "Active",
     jdChoice: "create",
     jd: MOCK_JD,
+    jdVersions: [{ version: 1, jd: MOCK_JD, createdAt: "2024-12-15T10:00:00Z" }],
     stats: { candidates: 24, avgScore: 7.9, sla: "At Risk", riskFlags: 1 },
     candidates: 24,
     shortlisted: 6,
@@ -122,6 +124,7 @@ export const DEFAULT_POSITIONS: PositionData[] = [
     status: "Active",
     jdChoice: "create",
     jd: { ...MOCK_JD, purpose: "Drive product strategy and roadmap for key business verticals. Work with engineering and design to ship features that delight users and move core metrics." },
+    jdVersions: [{ version: 1, jd: { ...MOCK_JD, purpose: "Drive product strategy and roadmap for key business verticals. Work with engineering and design to ship features that delight users and move core metrics." }, createdAt: "2024-12-14T09:30:00Z" }],
     stats: { candidates: 18, avgScore: 8.1, sla: "On Track", riskFlags: 0 },
     candidates: 18,
     shortlisted: 4,
@@ -144,6 +147,7 @@ export const DEFAULT_POSITIONS: PositionData[] = [
     status: "Active",
     jdChoice: "upload",
     jd: { ...MOCK_JD, purpose: "Create intuitive, accessible, and beautiful user experiences across web and mobile platforms. Conduct research, prototype solutions, and collaborate closely with engineering." },
+    jdVersions: [{ version: 1, jd: { ...MOCK_JD, purpose: "Create intuitive, accessible, and beautiful user experiences across web and mobile platforms. Conduct research, prototype solutions, and collaborate closely with engineering." }, createdAt: "2024-12-13T14:15:00Z" }],
     stats: { candidates: 8, avgScore: 7.2, sla: "On Track", riskFlags: 1 },
     candidates: 8,
     shortlisted: 3,

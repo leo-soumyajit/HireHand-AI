@@ -7,11 +7,14 @@ import { PositionDetail } from "@/components/dashboard/PositionDetail";
 import { JDInput } from "@/components/dashboard/JDInput";
 import { LoadingState } from "@/components/dashboard/LoadingState";
 import { QuestionList } from "@/components/dashboard/QuestionList";
-import { Question, generateMockQuestions } from "@/types/questions";
+import { Question } from "@/types/questions";
+import { generateQuestionsFromJD } from "@/lib/openrouter";
+import { useToast } from "@/hooks/use-toast";
 
 type DashboardView = "home" | "position-detail" | "input" | "loading" | "results";
 
 const Dashboard = () => {
+  const { toast } = useToast();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [view, setView] = useState<DashboardView>("home");
   const [activeSection, setActiveSection] = useState("home");
@@ -29,11 +32,26 @@ const Dashboard = () => {
   };
 
   const handleGenerate = async (jd: string) => {
+    if (!jd.trim()) {
+      toast({ title: "Error", description: "Job description cannot be empty", variant: "destructive" });
+      return;
+    }
+    
     setView("loading");
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    const generatedQuestions = generateMockQuestions();
-    setQuestions(generatedQuestions);
-    setView("results");
+    
+    try {
+      const generatedQuestions = await generateQuestionsFromJD(jd);
+      setQuestions(generatedQuestions);
+      setView("results");
+    } catch (error) {
+      console.error("Failed to generate questions:", error);
+      toast({ 
+        title: "Generation Failed", 
+        description: error instanceof Error ? error.message : "An unexpected error occurred while generating questions.",
+        variant: "destructive"
+      });
+      setView("input");
+    }
   };
 
   const handlePasteJD = () => {

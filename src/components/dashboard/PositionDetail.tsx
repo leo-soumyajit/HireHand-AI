@@ -28,6 +28,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { PositionData, PositionJD, CandidateData, loadPositions, savePositions } from "@/types/positions";
+import { enhanceJDWithAI } from "@/lib/openrouter";
+import { useToast } from "@/hooks/use-toast";
 import { CandidatesTab } from "@/components/dashboard/CandidatesTab";
 
 const TABS = [
@@ -55,9 +57,14 @@ export function PositionDetail({ positionId, onBack }: PositionDetailProps) {
     return positions.find((p) => p.id === positionId) || null;
   }, [positionId, positions]);
 
-  const handleJDSaved = useCallback((jd: PositionJD) => {
+  const handleJDSaved = useCallback((jd: PositionJD, versionCounter: number) => {
     setPositions((prev) => {
-      const updated = prev.map((p) => p.id === positionId ? { ...p, jd, jdChoice: "create" as const } : p);
+      const updated = prev.map((p) => {
+        if (p.id !== positionId) return p;
+        const newVersion = { version: versionCounter, jd, createdAt: new Date().toISOString() };
+        const jdVersions = p.jdVersions ? [...p.jdVersions, newVersion] : [newVersion];
+        return { ...p, jd, jdChoice: "create" as const, jdVersions };
+      });
       savePositions(updated);
       return updated;
     });
@@ -216,47 +223,135 @@ function OverviewTab({ position }: { position: PositionData }) {
   );
 }
 
-function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd: PositionJD) => void }) {
-  const [jdView, setJdView] = useState<"choice" | "paste">("choice");
+function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd: PositionJD, versionCounter: number) => void }) {
+  const { toast } = useToast();
+  const [jdView, setJdView] = useState<"choice" | "paste" | "upload" | "view">("view");
   const [jdText, setJdText] = useState("");
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  
+  // Track selected version separately from the "latest"
+  const defaultVersion = position.jdVersions && position.jdVersions.length > 0 
+    ? position.jdVersions[position.jdVersions.length - 1].version 
+    : 1;
+  const [selectedVersionId, setSelectedVersionId] = useState<number>(defaultVersion);
 
-  const handleSaveJD = () => {
+  const displayJD = useMemo(() => {
+    if (!position.jd) return null;
+    if (position.jdVersions) {
+      const ver = position.jdVersions.find(v => v.version === selectedVersionId);
+      if (ver) return ver.jd;
+    }
+    return position.jd;
+  }, [position, selectedVersionId]);
+
+  const handleSaveJD = async () => {
     if (!jdText.trim()) return;
-    const newJD: PositionJD = {
-      purpose: jdText.trim(),
-      education: ["As described in the job description"],
-      experience: ["As described in the job description"],
-      responsibilities: ["As described in the job description"],
-      skills: ["See full JD for details"],
+    setIsEnhancing(true);
+    try {
+      // Pass the current displayJD as context so the AI knows what to modify
+      const enhancedJD = await enhanceJDWithAI(jdText, displayJD || undefined);
+      const nextVersion = position.jdVersions ? position.jdVersions.length + 1 : 1;
+      onJDSaved(enhancedJD, nextVersion);
+      setSelectedVersionId(nextVersion);
+      setJdView("view");
+      toast({
+        title: "JD Enhanced successfully",
+        description: `Version ${nextVersion} saved.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Enhancement failed",
+        description: error instanceof Error ? error.message : "Failed to enhance JD",
+        variant: "destructive"
+      });
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result;
+      if (typeof content === "string") {
+        setJdText(content);
+        setJdView("paste"); // Go to paste view to allow editing before generating
+      }
     };
-    onJDSaved(newJD);
+    reader.readAsText(file);
+  };
+
+  const handleExportPDF = async () => {
+    const element = document.getElementById("jd-export-container");
+    if (!element) return;
+    
+    try {
+      // @ts-ignore - dynamic import without types
+      const html2pdf = (await import('html2pdf.js')).default;
+      const opt = {
+        margin:       10,
+        filename:     `${position.title.replace(/ /g, '_')}_JD_v${selectedVersionId}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+      html2pdf().set(opt).from(element).save();
+      toast({
+        title: "PDF Exported",
+        description: "Your Job Description has been downloaded successfully.",
+      });
+    } catch (e) {
+      console.error(e);
+      toast({ 
+        title: 'Export failed', 
+        description: 'An error occurred while building the PDF.',
+        variant: 'destructive' 
+      });
+    }
   };
 
   // No JD — show choice or paste view
-  if (!position.jd) {
+  if (!displayJD || jdView !== "view") {
     if (jdView === "paste") {
       return (
         <Card className="glass-strong">
           <CardContent className="p-6 space-y-4">
             <div className="flex items-center gap-2 mb-2">
               <Edit3 className="h-4 w-4 text-primary" />
-              <h3 className="text-sm font-semibold text-foreground font-display">Paste Job Description</h3>
+              <h3 className="text-sm font-semibold text-foreground font-display">{displayJD ? "Enhance Existing JD" : "Paste & Enhance Job Description"}</h3>
             </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              {displayJD 
+                ? "Provide specific instructions to modify the current Job Description. Example: 'Change the experience level to fresher (0-1 years) and add Python to the skills.' The AI will keep the rest of your beautiful JD intact." 
+                : "Paste your raw constraints, notes, or poorly formatted job description here. Our AI will automatically structure and enhance it into a professional format."}
+            </p>
             <Textarea
-              placeholder="Paste your full job description here..."
+              placeholder={displayJD ? "E.g., Make the experience section require 0-1 years of experience..." : "E.g., We need a senior dev with 5 years react and typescript..."}
               value={jdText}
               onChange={(e) => setJdText(e.target.value)}
               className="min-h-[250px] bg-background/50 border-border/50 focus:border-primary text-sm text-foreground placeholder:text-muted-foreground resize-none"
+              disabled={isEnhancing}
             />
             <div className="flex items-center justify-end gap-3">
-              <Button variant="ghost" onClick={() => setJdView("choice")}>Back</Button>
+              <Button variant="ghost" onClick={() => setJdView(position.jd ? "view" : "choice")} disabled={isEnhancing}>Back</Button>
               <Button
                 onClick={handleSaveJD}
-                disabled={!jdText.trim()}
-                className="gradient-primary text-primary-foreground font-semibold rounded-lg hover:opacity-90"
+                disabled={!jdText.trim() || isEnhancing}
+                className="gradient-primary text-primary-foreground font-semibold rounded-lg hover:opacity-90 min-w-[140px]"
               >
-                <Sparkles className="h-4 w-4 mr-1" />
-                Generate & Save
+                {isEnhancing ? (
+                  <div className="flex items-center gap-2">
+                    <div className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                    Enhancing...
+                  </div>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-1" />
+                    Generate & Save
+                  </>
+                )}
               </Button>
             </div>
           </CardContent>
@@ -276,27 +371,28 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto">
             <button
               onClick={() => setJdView("paste")}
-              className="flex flex-col items-center gap-3 p-6 rounded-xl border border-border/40 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 group"
+              className="flex flex-col items-center gap-3 p-6 rounded-xl border border-border/40 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 group relative overflow-hidden"
             >
-              <div className="flex h-14 w-14 items-center justify-center rounded-xl gradient-primary group-hover:glow-sm transition-all">
+              <div className="flex h-14 w-14 items-center justify-center rounded-xl gradient-primary group-hover:glow-sm transition-all z-10">
                 <Edit3 className="h-6 w-6 text-primary-foreground" />
               </div>
-              <div className="text-center">
-                <p className="font-semibold text-foreground text-sm">Paste JD</p>
-                <p className="text-xs text-muted-foreground mt-1">Write or paste text</p>
+              <div className="text-center z-10">
+                <p className="font-semibold text-foreground text-sm flex items-center justify-center gap-1">Paste <Sparkles className="h-3 w-3 text-primary" /></p>
+                <p className="text-xs text-muted-foreground mt-1">AI will enhance formatting</p>
               </div>
             </button>
-            <button
-              className="flex flex-col items-center gap-3 p-6 rounded-xl border border-border/40 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 group"
+            <label
+              className="flex flex-col items-center gap-3 p-6 rounded-xl border border-border/40 hover:border-primary/50 hover:bg-primary/5 transition-all duration-200 group cursor-pointer"
             >
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-muted group-hover:bg-muted/80 transition-all">
                 <Upload className="h-6 w-6 text-muted-foreground" />
               </div>
               <div className="text-center">
-                <p className="font-semibold text-foreground text-sm">Upload JD</p>
-                <p className="text-xs text-muted-foreground mt-1">Upload a document</p>
+                <p className="font-semibold text-foreground text-sm flex items-center justify-center gap-1">Upload <Sparkles className="h-3 w-3 text-primary" /></p>
+                <p className="text-xs text-muted-foreground mt-1">Upload a .txt document</p>
               </div>
-            </button>
+              <input type="file" accept=".txt,.md" className="hidden" onChange={handleFileUpload} />
+            </label>
           </div>
         </CardContent>
       </Card>
@@ -304,11 +400,55 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
   }
 
   // JD exists — render it
-  const jd = position.jd;
+  const jd = displayJD;
+  if (!jd) return null; // Should not happen
 
   return (
     <div className="space-y-6">
-      {/* Role Purpose */}
+      {/* Version Header Control */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 rounded-xl bg-muted/30 border border-border/50">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-foreground">Version History:</span>
+          <div className="flex gap-2">
+            {(position.jdVersions || [{version: 1}]).map((v: any) => (
+              <Badge 
+                key={v.version}
+                variant={selectedVersionId === v.version ? "default" : "outline"}
+                className={`cursor-pointer transition-colors ${selectedVersionId === v.version ? "gradient-primary border-transparent" : "hover:border-primary/50"}`}
+                onClick={() => setSelectedVersionId(v.version)}
+              >
+                v{v.version}
+              </Badge>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleExportPDF}
+            className="border-border/50 hover:bg-muted"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Export PDF
+          </Button>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="border-primary/50 text-primary hover:bg-primary/10"
+            onClick={() => {
+              setJdText("");
+              setJdView("paste"); // Clear text to let them paste fresh criteria for new version
+            }}
+          >
+            <Sparkles className="h-4 w-4 mr-2" />
+            Enhance / Modify
+          </Button>
+        </div>
+      </div>
+      
+      <div id="jd-export-container" className="space-y-6">
+        {/* Role Purpose */}
       <Card className="glass-strong">
         <CardContent className="p-6">
           <div className="flex items-center gap-2 mb-3">
@@ -387,6 +527,7 @@ function JDTab({ position, onJDSaved }: { position: PositionData; onJDSaved: (jd
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
